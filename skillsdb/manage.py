@@ -1,5 +1,5 @@
 """
-skillsdb is a simplate database driven program for managing people
+skillsdb is a simple database driven program for managing people
 and their associated skills
 
 Ian Roberts
@@ -15,7 +15,7 @@ import argparse
 import sys
 
 import config
-import view
+import views
 
 parser = argparse.ArgumentParser(prog='skillsdb', description=sys.modules[__name__].__doc__)
 parser.add_argument('--verbose', '-v', action='count', help='verbosity (use -vv for debug)')
@@ -24,17 +24,23 @@ subparsers = parser.add_subparsers(help='sub-command help')
 
 # config
 parser_group = subparsers.add_parser('config', description=config.main.__doc__, help="configure databse and general options")
-parser_group.add_argument('--file', type=str, help="configuration filename", default="config.txt")
-parser_group.add_argument('--user', type=str, help='database user', default='skills')
-parser_group.add_argument('--passwd', type=str, help='database passwd', default='skills')
-parser_group.add_argument('--host', type=str, help='database host (blank for sqlite)', default='')
-parser_group.add_argument('--dbtype', type=str, help='database type (sqlite)', default='sqlite')
-parser_group.add_argument('database', type=str, help='Database name to use',default='skills.sqlite')
+parser_group.set_defaults(func=config.main)
+
+parser_group.add_argument('load', type=str, help="Load a configuration file")
+parser_group.add_argument('save', type=str, help="Save a configuration file")
+parser_group.add_argument('filename', type=str, help="Configuration filename")
 
 config.ConfigOptions.customize_parser(parser_group)
+
 # views
-parser_group.subparsers.add_parser('manage', description=view.main._doc__, help="Manage database")
-parser_group.add_argument('skill', type=str, help="operation on skills table")
-parser_group.add_argument('person', type=str, help="operation on persons table")
-parser_group.add_argument('search', type=str, help="search for skill or person")
-view.ViewOptions.customize_parser(parser_group)
+parser_group = subparsers.add_parser('manage', description=views.main.__doc__, help="Manage database")
+parser_group.set_defaults(func=views.main)
+parser_group.add_argument('--id', type=int, help="Record ID", default=None)
+parser_group.add_argument('input', nargs=argparse.REMAINDER, help="Field data string")
+group = parser_group.add_mutually_exclusive_group()
+group.add_argument('--add','-A', action='store_true', help="Add a record")
+group.add_argument('--delete','-D', action='store_true', help="Delete a record")
+group.add_argument('--modify','-M', action='store_true', help="Modify a record")
+group.add_argument('--search', '-S', action='store_true', help="Search for a record")
+
+views.ViewOptions.customize_parser(parser_group)
