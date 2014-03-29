@@ -51,3 +51,23 @@ group.add_argument('--modify','-M', action='store_true', help="Modify a record")
 group.add_argument('--search', '-S', action='store_true', help="Search for a record")
 
 views.ViewOptions.customize_parser(parser_group)
+
+
+# setuser
+parser_group = subparsers.add_parser('setuser', description=config.setuser.__doc__, help="Change databse user or reset password")
+parser_group.set_defaults(func=config.setuser)
+parser_group.add_argument('old-value', type=str, help='Previous value')
+parser_group.add_argument('new-value', type=str, help='New value')
+parser_group.add_argument('filename', type=str, nargs='?', help='Option config file name')
+
+parser_group.add_argument('--host', '-o', type=str,
+        help='database host (blank for local)', default=config.DEFAULTS['host'])
+parser_group.add_argument('--dbtype', '-d', type=str,
+        help='database type (sqlite)', default=config.DEFAULTS['dbtype'])
+parser_group.add_argument('--dbname', '-n', type=str,
+        help='database name (blank)', default=config.DEFAULTS['dbname'])
+
+group = parser_group.add_mutually_exclusive_group(required=True)
+group.add_argument('--update-user', '-U', action='store_true', help='database user (skills)')
+group.add_argument('--update-passwd', '-P', action='store_true', help='database passwd (skills)')
+

@@ -36,9 +36,9 @@ class ConfigTestSetup(unittest.TestCase):
     """ Common methods for tests
     """
     def setUp(self):
-        if os.path.exists(path_to('data_out/config.txt')):
+        if os.path.exists(path_to('data_out/config.cfg')):
             self.remove_files()
-        config_file = path_to('test_config_file.txt')
+        config_file = path_to('test_config_file.cfg')
         self.params_custom = Params(config_file)
         self.params_default = Params(load=True)
 

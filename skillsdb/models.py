@@ -84,6 +84,13 @@ class RefParentMixin(object):
 #===========================
 # Application defined models
 #===========================
+class Params(DbMixin, Base):
+    """ Store database parameters in database
+    """
+    id = Column(Integer, primary_key=True)
+    user = Column(String(50))
+    passwd = Column(String(50))
+
 class Skill(DbMixin, RefParentMixin, Base):
     """ Skill of parent
     """
@@ -133,26 +140,32 @@ class Child(PersonMixin, RefParentMixin, DbMixin, Base):
 ##===================
 ## Database functions
 ##===================
-def init(uri, host='', user='', passwd='', dbtype='sqlite', echo=False):
+CONNECTORS = {'mysql':'mysql://', 'sqlite':'sqlite:///'}
+def init(uri, **kwargs):
     """ Initialize connection to database or create new
         Determine appropriate interpreters given input
         Defaults to local sqlite database
     """
+    path = kwargs['path']
+    dbtype = kwargs['dbtype']
+    user = kwargs['user']
+    passwd =  base64.decodestring(kwargs['passwd'])
+    host = kwargs['host']
+    midstring = user + ':' + passwd + '@' + host
+    
     if type(uri) != type('string'):
         engine = sa.create_engine(uri.db_con_string, poolclass=NullPool)
+        
     else:
-        if passwd:
-            passwd = base64.b64decode(passwd)
-        if dbtype == 'mysql':
-            engine = sa.create_engine(
-                'mysql://' + user + ':' + passwd + '@' + host + '/' + uri, poolclass=NullPool
-            )
-        elif dbtype == 'sqlite':
-            engine = sa.create_engine(
-                'sqlite:///' + uri, echo=echo, poolclass=NullPool
-            )
+        begstring = CONNECTORS[dbtype]
+        dburl = begstring + midstring
+        
+        if dbtype == 'sqlite':
+            dburl = begstring + path + '/' + uri
         else:
-            raise NotImplementedError, "Unsupported database type!"
+            dburl = dburl + '/' + uri
+
+    engine = sa.create_engine(dburl, echo=False, poolclass=NullPool)
     metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     return Session()

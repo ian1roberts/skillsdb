@@ -4,14 +4,19 @@ configuration module
 
 import os
 import sys
+import base64
 
 import logutils
 import models
 
-KNOWN_DBTYPES = ['sqlite', 'mysql']
-FNAME = 'config.txt'
+from sqlalchemy.orm.exc import NoResultFound
 
-DEFAULTS = {'filename':FNAME, 'dbtype':'sqlite', 'force':False, 'set':False, 'user':'skills', 'passwd':'skill', 'host':'', 'dbname':'skillsdb.sqlite'}
+KNOWN_DBTYPES = ['sqlite', 'mysql']
+FNAME = 'config.cfg'
+
+DEFAULTS = {'filename':FNAME, 'dbtype':'sqlite', 'force':False,
+            'user':'skills', 'passwd':base64.encodestring('skills').rstrip(),
+            'host':'', 'dbname':'skillsdb.sqlite'}
 
 log = logutils.setup_log(__name__)
 class ConfigException(Exception):
@@ -24,8 +29,6 @@ class ConfigOptions(object):
         group = parser.add_argument_group('optional database arguments', cls.__doc__)
         group.add_argument('--force', '-F', action='store_true',
                            help='overwrite existing config file')
-        group.add_argument('--set', '-S', action='store_true',
-                           help='update database access credentials')
         group.add_argument('--user', '-u', type=str,
                            help='database user (skills)', default=DEFAULTS['user'])
         group.add_argument('--passwd', '-p', type=str,
@@ -45,10 +48,12 @@ class Config(object):
         Options fallback to defaults if not specified
     """
 
-    def __init__(self, args):
+    def __init__(self, args, update=False):
         """ Provide some basic validation when options are read
         """
         args.dname, args.bname = get_file_paths(args.filename)
+        if not args.dname:
+            args.dname = os.getcwd()
         self.args = args
         self.settings = {}
 
@@ -59,6 +64,45 @@ class Config(object):
         if args.save:
             self.settings = self.load_config(chkfile=False)
             self.save_config()
+
+        if not self.settings:
+            log.error('Failed to create session settings')
+            sys.exit(-1)
+
+        session = models.init(uri=self['dbname'], host=self['host'], user=self['user'],
+                                   passwd=self['passwd'], dbtype=self['dbtype'], path=args.dname)
+        log.info("Database session to <%s> established" % self['dbname'])
+
+        if update:
+            return session
+
+        try:
+            params = session.query(models.Params).one()
+        except NoResultFound:
+            params =None
+            
+        if not params:
+            param = models.Params(user=self['user'], passwd=self['passwd'])
+            session.add(param)
+            session.commit()
+            log.info('Registerd database owner <%s>' % self['user'])
+        else:
+            existing_user = params.user
+            existing_pass = base64.decodestring(params.passwd)
+
+            current_user = self['user']
+            current_pass = base64.decodestring(self['passwd'])
+
+            #print '*Debug: %s :: %s == %s :: %s' % (existing_user, existing_pass, current_user, current_pass)
+
+            if not (existing_user == current_user and existing_pass == current_pass):
+                    log.error('Incorrect user (%s) or Password (%s) not valid' % (
+                        current_user, current_pass))
+                    log.error('Have you changed your password?')
+                    log.error('Use the <skillsdb setuser> command to update password tokens')
+                    log.error('You will need <user> <prev passwd> <current passwd> to reset')
+                    sys.exit(-1)
+            log.info('User <%s> with password <hidden> successfully authenticated' % current_user)
 
     def __repr__(self):
         return "skillsdb Config: %s" % self.__class__
@@ -81,16 +125,26 @@ class Config(object):
             Create config file if it doesn't exist
         """
         if chkfile and self.args.bname == FNAME and not os.path.exists(self.args.filename):
-            log.info('No previous config file. Setting all defaults.')
+            log.info('No previous config file. Setting all defaults in <%s>.' % self.args.bname)
             local_defaults = self.create_default_config()
             self.save_config(local_defaults)
 
+        if not os.path.exists(self.args.filename) and self.args.bname == FNAME:
+            log.warning('No config file, probably trying to save uninitialized parameters.\nApply a reinitialization fix.')
+            self.load_config()
+            
         local_defaults = DEFAULTS
         with open(self.args.filename, 'r') as fh:
             for line in fh:
+                src = '<%s> file' % self.args.bname
                 if line.startswith('#'):
                     continue
-                key, value = line.strip().split('=')
+                try:
+                    key, value = line.strip().split('\t')
+                except ValueError:
+                    key = line.strip()
+                    value = ""
+                    
                 key = key.lower().strip()
                 
                 if key in ['set', 'force']:
@@ -99,12 +153,13 @@ class Config(object):
                 try:
                     cli_arg = self.parse_arg(key)
                     if DEFAULTS[key] != cli_arg:
+                        src = 'command line'
                         value = cli_arg
-                        log.warning(
-                            'Command line session parameter override: %s = %s' % (key, value))
-                    else:
-                        log.info('Loaded parameter from %s file: %s = %s' % (self.args.bname, key, value))
+                        if key == 'passwd':
+                            value = base64.encodestring(value).rstrip()
                     local_defaults[key] = value
+                    if self.args.load:
+                        log.info('Loaded parameter from %s: %s = %s' % (src, key, value))
                 except KeyError:
                     log.error("%s is not a valid configuration key. Cannot continue" % key)
                     raise ConfigException, "%s is not a known configuration keyword" % key
@@ -119,7 +174,9 @@ class Config(object):
             
         with open(local_defaults['filename'], 'w') as fh:
             for key, value in local_defaults.iteritems():
-                line = '='.join([key, str(value)]) + '\n'
+                line = '\t'.join([key, str(value)]) + '\n'
+                if self.args.save:
+                    log.info("Update <%s> config file: %s = %s" %(self.args.bname, key, value))
                 fh.write(line)
 
     def validate_args(self):
@@ -156,18 +213,26 @@ class Config(object):
             cli_arg = self.parse_arg(key)
 
             if DEFAULTS[key] != cli_arg:
-                log.warning("Initialized %s with %s from command line" % (key, cli_arg))
+                txt,src = cli_arg if cli_arg else "<nothing>", "command line"
+                if key == 'passwd':
+                    cli_arg = base64.encodestring(cli_arg).rstrip()
                 local_defaults[key] = cli_arg
             else:
-                log.info("Initialized %s with %s from default settings" % (key, DEFAULTS[key]))
+                txt,src = DEFAULTS[key] if DEFAULTS[key] else "<nothing>", "defaults"
+            log.info("Initialized %s with %s from %s" % (key, txt, src))
 
         return local_defaults
+       
 
 def get_file_paths(fname):
     dname = os.path.dirname(fname)
     bname = os.path.basename(fname)
     return dname, bname
-        
+
+def setuser(args):
+    """ Update database user and password access credentials
+    """
+    print args
         
 def main(args):
     """Configure the current program session
