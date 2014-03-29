@@ -5,6 +5,7 @@ configuration module
 import os
 import sys
 
+import logutils
 import models
 
 KNOWN_DBTYPES = ['sqlite', 'mysql']
@@ -12,6 +13,7 @@ FNAME = 'config.txt'
 
 DEFAULTS = {'filename':FNAME, 'dbtype':'sqlite', 'force':False, 'set':False, 'user':'skills', 'passwd':'skill', 'host':'', 'dbname':'skillsdb.sqlite'}
 
+log = logutils.setup_log(__name__)
 class ConfigException(Exception):
     pass
 
@@ -46,6 +48,7 @@ class Config(object):
     def __init__(self, args):
         """ Provide some basic validation when options are read
         """
+        args.dname, args.bname = get_file_paths(args.filename)
         self.args = args
         self.settings = {}
 
@@ -54,6 +57,7 @@ class Config(object):
         if args.load:
             self.settings = self.load_config()
         if args.save:
+            self.settings = self.load_config(chkfile=False)
             self.save_config()
 
     def __repr__(self):
@@ -72,11 +76,12 @@ class Config(object):
             return self.settings.get(key, None)
         raise ConfigException, "% is not a known parameter key" % key
 
-    def load_config(self):
+    def load_config(self, chkfile=True):
         """ Initialise database from config file.
             Create config file if it doesn't exist
         """
-        if self.args.filename == FNAME and not os.path.exists(FNAME):
+        if chkfile and self.args.bname == FNAME and not os.path.exists(self.args.filename):
+            log.info('No previous config file. Setting all defaults.')
             local_defaults = self.create_default_config()
             self.save_config(local_defaults)
 
@@ -86,16 +91,32 @@ class Config(object):
                 if line.startswith('#'):
                     continue
                 key, value = line.strip().split('=')
+                key = key.lower().strip()
+                
+                if key in ['set', 'force']:
+                    value = True if value.lower() == 'true' else False
+                    
                 try:
-                    local_defaults[key]=value
+                    cli_arg = self.parse_arg(key)
+                    if DEFAULTS[key] != cli_arg:
+                        value = cli_arg
+                        log.warning(
+                            'Command line session parameter override: %s = %s' % (key, value))
+                    else:
+                        log.info('Loaded parameter from %s file: %s = %s' % (self.args.bname, key, value))
+                    local_defaults[key] = value
                 except KeyError:
+                    log.error("%s is not a valid configuration key. Cannot continue" % key)
                     raise ConfigException, "%s is not a known configuration keyword" % key
                     
         return local_defaults
         
-    def save_config(self, local_defaults):
+    def save_config(self, local_defaults=None):
         """ Export current program options to config file
         """
+        if not local_defaults:
+            local_defaults = self.create_default_config()
+            
         with open(local_defaults['filename'], 'w') as fh:
             for key, value in local_defaults.iteritems():
                 line = '='.join([key, str(value)]) + '\n'
@@ -107,7 +128,7 @@ class Config(object):
             2) database access credentials are sensible
         """
         if self.args.load:
-            if not self.args.filename == FNAME and not os.path.exists(self.args.filename):
+            if not self.args.bname == FNAME and not os.path.exists(self.args.filename):
                 raise OSError, (
                     "%s config file could not be found. Check path names" % self.args.filename)
 
@@ -127,22 +148,25 @@ class Config(object):
         """
         return vars(self.args)[key]
 
-    def parse_config_file(self):
-        """ Read session options from config file
-        """
-        pass
-
     def create_default_config(self):
         """ Merge CLI args with default program settings
         """
         local_defaults = DEFAULTS
         for key in DEFAULTS:
             cli_arg = self.parse_arg(key)
-            if cli_arg:
+
+            if DEFAULTS[key] != cli_arg:
+                log.warning("Initialized %s with %s from command line" % (key, cli_arg))
                 local_defaults[key] = cli_arg
-            
+            else:
+                log.info("Initialized %s with %s from default settings" % (key, DEFAULTS[key]))
+
         return local_defaults
 
+def get_file_paths(fname):
+    dname = os.path.dirname(fname)
+    bname = os.path.basename(fname)
+    return dname, bname
         
         
 def main(args):

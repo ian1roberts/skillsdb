@@ -17,7 +17,7 @@ def path_to(filename):
 class Params(object):
     def __init__(self, config_file=config.FNAME, **kwargs):
         # user definable database parameters
-        self.filename = config_file
+        self.filename = path_to('data_out/' + config_file)
         self.user = 'skills'
         self.passwd = 'skills'
         self.host = ''
@@ -36,7 +36,7 @@ class ConfigTestSetup(unittest.TestCase):
     """ Common methods for tests
     """
     def setUp(self):
-        if os.path.exists(path_to('data_out/exported.csv')):
+        if os.path.exists(path_to('data_out/config.txt')):
             self.remove_files()
         config_file = path_to('test_config_file.txt')
         self.params_custom = Params(config_file)
@@ -44,7 +44,7 @@ class ConfigTestSetup(unittest.TestCase):
 
 
     def remove_files(self):
-        os.unlink(path_to('data_out/exported.csv'))
+        os.unlink(path_to('data_out/config.txt'))
         
 class ConfigProgram(ConfigTestSetup):
     

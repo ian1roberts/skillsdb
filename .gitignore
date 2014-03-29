@@ -1,3 +1,7 @@
+.logs
+config.txt
+skillsdb.sqlite
+#*#
 *.py[cod]
 
 # C extensions
