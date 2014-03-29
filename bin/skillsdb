@@ -4,4 +4,4 @@ import logging
 import skillsdb.manage
 args = skillsdb.manage.parser.parse_args()
 
-args.func(args)
+sys.exit(args.func(args))
