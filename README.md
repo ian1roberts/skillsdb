@@ -23,7 +23,7 @@ Configuration
 Provide simple unified interface for generic
 configuration. Configurations may be loaded from / saved to a  config
 file.  Command line options override settings loaded from file when
-*--force*ed.  Overridden loaded settings _do not_ persist unless a
+*--force'ed*.  Overridden loaded settings _do not_ persist unless a
 *--save* is selected.
 
 Supports sqlite and mysql through SQLalchemy connectors::
