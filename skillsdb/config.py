@@ -53,12 +53,12 @@ class Config(object):
         """ Provide some basic validation when options are read
         """
         args.dname, args.bname = get_file_paths(args.filename)
-        if not args.dname:
-            args.dname = os.getcwd()
+        args.filename = os.path.join(args.dname, args.bname)
         self.args = args
         self.settings = {}
-
         self.validate_args()
+
+        log.info('skillsdb configuration:%s' % args.filename)
 
         if args.load:
             self.settings = self.load_config()
@@ -197,7 +197,7 @@ class Config(object):
             1) filename exists
             2) database access credentials are sensible
         """
-        if self.args.load:
+        if self.args.load and not self.args.force:
             if not self.args.bname == FNAME and not os.path.exists(self.args.filename):
                 raise OSError, (
                     "%s custom config file could not be found. Check path names" % self.args.filename)
@@ -263,6 +263,8 @@ class Config(object):
 def get_file_paths(fname):
     dname = os.path.dirname(fname)
     bname = os.path.basename(fname)
+    if not dname:
+        dname = os.getcwd()
     return dname, bname
 
 def setuser(args):
