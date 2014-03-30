@@ -148,8 +148,14 @@ def init(uri, **kwargs):
     path = kwargs['path']
     dbtype = kwargs['dbtype']
     user = kwargs['user']
+
     passwd =  kwargs['passwd']
     host = kwargs['host']
+    if dbtype == 'mysql':
+        passwd =  base64.decodestring(kwargs['passwd']).rstrip()
+        if not host:
+            host = 'localhost'
+            
     midstring = user + ':' + passwd + '@' + host
     
     if type(uri) != type('string'):
