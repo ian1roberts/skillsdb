@@ -34,7 +34,7 @@ parser_group._optionals.title = 'action'
 group = parser_group.add_mutually_exclusive_group(required=True)
 group.add_argument('--load', '-l', action='store_true', help="Load a configuration file")
 group.add_argument('--save', '-s', action='store_true', help="Save a configuration file")
-parser_group.add_argument('filename', nargs='?', type=str, help="Configuration filename",
+parser_group.add_argument('filename', nargs="?", type=str, help="Configuration filename",
                           default=config.FNAME)
 
 config.ConfigOptions.customize_parser(parser_group)

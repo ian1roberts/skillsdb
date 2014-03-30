@@ -44,7 +44,8 @@ class ConfigTestSetup(unittest.TestCase):
 
 
     def remove_files(self):
-        os.unlink(path_to('data_out/config.txt'))
+        os.unlink(path_to('data_out/config.cfg'))
+        os.unlink(path_to('data_out/skillsdb.sqlite'))
         
 class ConfigProgram(ConfigTestSetup):
     

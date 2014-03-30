@@ -6,12 +6,11 @@ import base64
 import datetime
 
 import sqlalchemy as sa
-import sqlalchemy.types as types
 
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
-from sqlalchemy.orm import mapper, sessionmaker, relationship, backref
-from sqlalchemy import (Table, Column, Integer, String, MetaData, ForeignKey,
-                        Float, Boolean, DateTime, PickleType)
+from sqlalchemy.orm import sessionmaker, relationship, backref
+from sqlalchemy import (Table, Column, Integer, String, ForeignKey,
+                        DateTime)
 from sqlalchemy.pool import NullPool
 
 metadata = sa.MetaData()
@@ -149,7 +148,7 @@ def init(uri, **kwargs):
     path = kwargs['path']
     dbtype = kwargs['dbtype']
     user = kwargs['user']
-    passwd =  base64.decodestring(kwargs['passwd'])
+    passwd =  kwargs['passwd']
     host = kwargs['host']
     midstring = user + ':' + passwd + '@' + host
     
