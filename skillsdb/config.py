@@ -69,14 +69,14 @@ class Config(object):
         if not self.settings:
             log.error('Failed to create session settings')
             sys.exit(-1)
-
-        session = models.init(uri=self['dbname'], host=self['host'], user=self.user,
-                                   passwd=self.passwd_hash, dbtype=self['dbtype'], path=args.dname)
-        log.info("Database session to <%s> established" % self['dbname'])
-
-        # Return session if performing user / passwd update of database params
+            
+        # Return if performing user / passwd update of database params
         if update:
-            return session
+            log.info("Attempt to update database credentials")
+            return
+            
+        session = self.get_session()
+        log.info("Database session to <%s> established" % self['dbname'])
 
         # Simple database authentication (simply check current user / passwd hash
         # against stored credentials)
@@ -108,6 +108,8 @@ class Config(object):
                     sys.exit(-1)
             log.info('User <%s> with password <hidden> successfully authenticated' % current_user)
 
+
+
     def __repr__(self):
         return "skillsdb Config: %s" % self.__class__
 
@@ -123,6 +125,11 @@ class Config(object):
         if key in DEFAULTS:
             return self.settings.get(key, None)
         raise ConfigException, "% is not a known parameter key" % key
+        
+    def get_session(self):
+        """ Return a database session according to config values
+        """
+        return models.init(uri=self['dbname'], host=self['host'], user=self.user, passwd=self.passwd_hash, dbtype=self['dbtype'], path=self.args.dname)
 
     def load_config(self):
         """ Initialise database from config file.
@@ -157,13 +164,12 @@ class Config(object):
                 try:
                     # Return command line arg for key.  It will override file value.
                     cli_arg = self.parse_arg(key)
-                    
                     # If key is passwd, encode the command line value
-                    if key == 'passwd':
+                    if key == 'passwd' and cli_arg:
                         cli_arg = self.passwd_encode
                         
                     # print '*key:%s\tfile:%s\tcli:%s' % (key, value, cli_arg)
-                    if self.args.force and value != cli_arg:
+                    if cli_arg and self.args.force and value != cli_arg:
                         src = 'command line'
                         value = cli_arg
                     local_defaults[key] = value
@@ -270,7 +276,52 @@ def get_file_paths(fname):
 def setuser(args):
     """ Update database user and password access credentials
     """
+    if not os.path.exists(args.filename):
+        raise ConfigException, "%s config file not found" % args.filename
+
     print args
+    
+    args.load = True
+    args.force = True
+    args.save = False
+    args.dbtype = None
+    args.passwd = None
+    args.host = None
+    args.user = None
+    args.dbname = None
+    config = Config(args, True)
+
+    if args.update_user:
+        if config['user'] == args.oldvalue:
+            session = config.get_session()
+            params = session.query(models.Params).one()
+            params.user = args.newvalue
+            session.commit()
+            session.close()
+            
+            log.info('Database username changed from %s to %s' % (config['user'], args.newvalue))
+            config.settings['user'] = args.newvalue
+            config.save_config(config.settings)
+        else:
+            log.error('Existing user names do not match.')
+            
+    if args.update_passwd:
+        existing_pass = config.passwd_hash
+        old_pass = base64.encodestring(args.oldvalue).rstrip()
+        new_pass = base64.encodestring(args.newvalue).rstrip()
+
+        if existing_pass == old_pass:
+            session = config.get_session()
+            params = session.query(models.Params).one()
+            params.passwd = new_pass
+            session.commit()
+            session.close()
+
+            log.info('Database password successfully updated')
+            config.settings['passwd'] = new_pass
+            config.save_config(config.settings)
+        else:
+            log.error('Existing passwords do not match.')
         
 def main(args):
     """Configure the current program session
