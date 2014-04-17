@@ -43,6 +43,8 @@ config.ConfigOptions.customize_parser(parser_group)
 parser_group = subparsers.add_parser('manage', description=views.main.__doc__, help="Manage database")
 parser_group.set_defaults(func=views.main)
 parser_group.add_argument('--id', type=int, help="Record ID", default=None)
+parser_group.add_argument('--config', '-C', type=str, help="config filename (config.cfg)", default=config.FNAME)
+
 parser_group.add_argument('input', nargs=argparse.REMAINDER, help="Field data string")
 group = parser_group.add_mutually_exclusive_group(required=True)
 group.add_argument('--add','-A', action='store_true', help="Add a record")

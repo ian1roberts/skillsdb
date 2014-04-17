@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import sessionmaker, relationship, backref
 from sqlalchemy import (Table, Column, Integer, String, ForeignKey,
-                        DateTime)
+                        DateTime, inspect)
 from sqlalchemy.pool import NullPool
 
 metadata = sa.MetaData()
@@ -58,6 +58,14 @@ class DbMixin(object):
 
     def __str__(self):
         return "%r, (%s)" % (self, self.id)
+        
+    def get_attrs(self):
+        item = inspect(self)
+        return item.attrs.keys()
+        
+    @declared_attr
+    def classname(cls):
+        return cls.__name__.lower()
 
 class PersonMixin(object):
     """ Attributes for a generic person object (parent / child)
