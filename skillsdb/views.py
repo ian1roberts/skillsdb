@@ -3,6 +3,8 @@ Database views
 """
 import sys
 import os
+import sqlalchemy as sql
+
 
 import utils
 import config
@@ -50,7 +52,9 @@ class View(object):
 
         table = self.get_table_object()
         operation = self.get_operation()
-        input_dict = self.get_input(table)
+        input_dict = {}
+        if not (operation == self.delete_view and table == models.Parent):
+            input_dict = self.get_input(table)
 
         self.validate_cla(table, operation, input_dict)
         self.session_config = self.load_session(self.args.config)
@@ -108,17 +112,20 @@ class View(object):
                 return ("a", table_name)
                 
         if operation == self.create_view:
-            if table == models.Parent and self.args.id:
+            if table == models.Parent and self.args.pid:
                 raise ViewError, "Parent ID shouldn't be given when creating Parent"
-            elif not self.args.id and (table == models.Skill or table == models.Freetime or table == models.Child or table == models.Address):
+            elif not self.args.pid and (table == models.Skill or table == models.Freetime or table == models.Child or table == models.Address):
                 raise ViewError, "Parent ID is required when creating %s %s record" % (do_proc_name(table.classname))
 
         if operation == self.retrieve_view:
-            if self.args.id:
+            if self.args.pid:
                 raise ViewError, "Parent ID shouldn't be given when doing a lookup"
         if operation == self.update_view or operation == self.delete_view:
-            if not self.args.id:
-                raise ViewError, "parent ID required to update records"
+            if not self.args.pid:
+                raise ViewError, "parent ID required to update or delete records"
+        if operation == self.delete_view:
+            if table != models.Parent and "record" not in input_dict:
+                raise ViewError, "'id'required to delete non parent record"
 
         if not os.path.exists(self.args.config):
             raise ViewError, "%s configuration file not found" % os.path.basename(self.args.config)
@@ -134,6 +141,8 @@ class View(object):
 
         """
         valid_keys = table().get_attrs()
+        valid_keys += ['record']
+        
         if not self.args.input:
             raise ViewError, "No input data to parse"
 
@@ -151,6 +160,12 @@ class View(object):
                     key, table.classname
                 )
 
+            if key == 'record':
+                try:
+                    value = int(value)
+                except ValueError:
+                    print "%s is not a valid record ID" % value
+                    
             key_dict[key]=value
 
         return key_dict
@@ -158,19 +173,32 @@ class View(object):
     def create_view(self, **kwargs):
         """ Create a new record
         """
-        print kwargs
-        session =  self.session_config.get_session()
-        table_object = kwargs['table']
-        params = kwargs['input_dict']
+        session, table_object, params = self.parse_objects(**kwargs)
+        print params
+        
         record = table_object(**params)
         session.add(record)
         session.commit()
         session.close()
         
     def delete_view(self, **kwargs):
-        """ Delete a record by parent_id
+        """ Delete a record by parent_id and record id
         """
-        print kwargs
+        session, table_object, params = self.parse_objects(**kwargs)
+
+        if not table_object == models.Parent:
+            q = session.query(table_object).filter(sql.and_(
+                table_object.parent_id == params['parent_id'],
+                table_object.id == params['record'])).one()
+
+        else:
+            q = session.query(models.Parent).filter(
+                models.Parent.id == params['parent_id']).one()
+
+        session.delete(q)
+        session.commit()
+        session.close()
+        
 
     def retrieve_view(self, **kwargs):
         """ Perform a lookup
@@ -182,6 +210,21 @@ class View(object):
         """
         print kwargs
 
+    def parse_objects(self, **kwargs):
+        session =  self.session_config.get_session()
+        table_object = kwargs['table']
+        params = kwargs['input_dict']
+
+        if self.args.pid:
+            try:
+                parent_id = int(self.args.pid)
+            except ValueError, e:
+                print e
+                print 'Incorrectly formatted parent id:%s' % self.args.pid
+
+            params['parent_id'] = parent_id
+            
+        return (session, table_object, params)
 
 def main(args):
     """ Parse input command and dispatch

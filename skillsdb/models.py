@@ -134,8 +134,8 @@ class Address(DbMixin, RefParentMixin, Base):
     parent = relationship('Parent', uselist=False, backref=backref('address', uselist=False))
 
     def __str__(self,):
-        return '\n'.join([self.line01, self.line02, self.village,
-                          self.city, self.postcode, self.country])
+        return '\n'.join(map(str,[self.line01, self.line02, self.village,
+                          self.city, self.postcode, self.country]))
 
 class Child(PersonMixin, RefParentMixin, DbMixin, Base):
     """ Child object
