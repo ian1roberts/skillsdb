@@ -4,7 +4,7 @@ Database views
 import sys
 import os
 import sqlalchemy as sql
-
+import datetime
 
 import utils
 import config
@@ -142,6 +142,9 @@ class View(object):
         """
         valid_keys = table().get_attrs()
         valid_keys += ['record']
+
+        print valid_keys
+        print self.args.input
         
         if not self.args.input:
             raise ViewError, "No input data to parse"
@@ -165,6 +168,9 @@ class View(object):
                     value = int(value)
                 except ValueError:
                     print "%s is not a valid record ID" % value
+
+            if key in ['am_start', 'am_end', 'pm_start', 'pm_end']:
+                value = format_time(value)
                     
             key_dict[key]=value
 
@@ -174,7 +180,15 @@ class View(object):
         """ Create a new record
         """
         session, table_object, params = self.parse_objects(**kwargs)
+        print '**PARAMS'
         print params
+        try:
+            pid = params['pid']
+            params['parent_id'] = pid
+            del params['pid']
+        except KeyError:
+            pass
+            
         
         record = table_object(**params)
         session.add(record)
@@ -188,12 +202,12 @@ class View(object):
 
         if not table_object == models.Parent:
             q = session.query(table_object).filter(sql.and_(
-                table_object.parent_id == params['parent_id'],
+                table_object.parent_id == params['pid'],
                 table_object.id == params['record'])).one()
 
         else:
             q = session.query(models.Parent).filter(
-                models.Parent.id == params['parent_id']).one()
+                models.Parent.id == params['pid']).one()
 
         session.delete(q)
         session.commit()
@@ -208,8 +222,25 @@ class View(object):
     def update_view(self, **kwargs):
         """ Modify a record
         """
-        print kwargs
+        session, table_object, params = self.parse_objects(**kwargs)
 
+        if not table_object == models.Parent:
+            q = session.query(table_object).filter(sql.and_(
+                table_object.parent_id == params['pid'],
+                table_object.id == params['record'])).one()
+
+        else:
+            q = session.query(models.Parent).filter(
+                models.Parent.id == params['pid']).one()
+
+        for k,v in params.iteritems():
+            if k == 'pid':
+                continue
+            setattr(q, k, v)
+
+        session.commit()
+        session.close()
+        
     def parse_objects(self, **kwargs):
         session =  self.session_config.get_session()
         table_object = kwargs['table']
@@ -217,15 +248,28 @@ class View(object):
 
         if self.args.pid:
             try:
-                parent_id = int(self.args.pid)
+                pid = int(self.args.pid)
             except ValueError, e:
                 print e
                 print 'Incorrectly formatted parent id:%s' % self.args.pid
 
-            params['parent_id'] = parent_id
+            params['pid'] = pid
             
         return (session, table_object, params)
 
+def format_time(timestr):
+    if ':' not in timestr or 4 < len(timestr) > 5:
+        raise ValueError, 'Input times must be hh:mm format'
+
+    #datetime.datetime.combine(datetime.datetime.today().date(), datetime.time(9,0))
+    today = datetime.datetime.today().date()
+    
+    h,m = timestr.split(':')
+    try:
+        return datetime.datetime.combine(today, datetime.time(int(h), int(m)))
+    except ValueError, e:
+        print "%s\n%s hours, %s mins incorrectly formatted" % (e, h, m)
+    
 def main(args):
     """ Parse input command and dispatch
     """

@@ -10,11 +10,16 @@ import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import sessionmaker, relationship, backref
 from sqlalchemy import (Table, Column, Integer, String, ForeignKey,
-                        DateTime, inspect)
+                        DateTime, Time, inspect)
 from sqlalchemy.pool import NullPool
 
 metadata = sa.MetaData()
 Base = declarative_base(metadata=metadata)
+TODAY = datetime.datetime.today().date()
+TIME_AM_START = datetime.datetime.combine(TODAY, datetime.time(9, 0))
+TIME_AM_END = datetime.datetime.combine(TODAY, datetime.time(12, 0))
+TIME_PM_START = datetime.datetime.combine(TODAY, datetime.time(13, 0))
+TIME_PM_END = datetime.datetime.combine(TODAY, datetime.time(17, 0))
 
 # parent <--> skill :: many to many relationship  interim table
 parent_skill = Table('parent_skill', Base.metadata,
@@ -109,10 +114,34 @@ class Freetime(DbMixin, RefParentMixin, Base):
     """ Time when parent is available
     """
     id =  Column(Integer, primary_key=True)
-    start = Column(DateTime)
-    end = Column(DateTime)
+    day = Column(String(12))
+    am_start = Column(DateTime, default=TIME_AM_START)
+    am_end = Column(DateTime, default=TIME_AM_END)
+    pm_start = Column(DateTime, default=TIME_PM_START)
+    pm_end = Column(DateTime, default=TIME_PM_END)
     parents = relationship('Parent', secondary=parent_freetime, backref='freetimes')
 
+    def get_duration(self, start, end):
+        """ Return am, pm, day availability as determined by
+        """
+        if start and end and end > start:
+            return end - start
+
+        return 0
+            
+    @property
+    def get_period(self):
+        am = self.get_duration(self.am_start, self.am_end)
+        pm = self.get_duration(self.pm_start, self.pm_end)
+
+        if am and pm:
+            return 'Day'
+        if am:
+            return 'AM'
+        if pm:
+            return 'PM'
+        return 'NA'
+        
 class Parent(PersonMixin, RefParentMixin, DbMixin, Base):
     """ Parent object
     """
@@ -130,6 +159,13 @@ class Address(DbMixin, RefParentMixin, Base):
     city = Column(String(50))
     postcode = Column(String(50))
     country = Column(String(50), default='UK')
+
+    home_telephone = Column(String(50))
+    mobile_telephone = Column(String(50))
+    other_telephone = Column(String(50))
+    home_email = Column(String(100))
+    work_email = Column(String(100))
+    other_email = Column(String(100))
 
     parent = relationship('Parent', uselist=False, backref=backref('address', uselist=False))
 
