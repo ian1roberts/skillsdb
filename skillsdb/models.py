@@ -5,13 +5,15 @@ Object relational mapping configuration - Declarative
 import base64
 import datetime
 
-import sqlalchemy as sa
 
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import sessionmaker, relationship, backref
 from sqlalchemy import (Table, Column, Integer, String, ForeignKey,
-                        DateTime, Time, inspect)
+                        DateTime, Time)
 from sqlalchemy.pool import NullPool
+import sqlalchemy as sa
+
+print sa.__version__
 
 metadata = sa.MetaData()
 Base = declarative_base(metadata=metadata)
