@@ -11,8 +11,7 @@ import config
 import models
 
 CONDITIONS = {'OR':sql.or_, 'AND':sql.and_, 'NOT':sql.not_,
-              'startswith':'startswith', 'equals':'equals', 'contains':'contains',
-              'like':'like'}
+              'equals':'==', 'like':'.like(', 'not':'!='}
 
 class ViewOptions(object):
     """ Options to extend view methods
@@ -119,7 +118,7 @@ class View(object):
             if self.args.pid or self.args.rid:
                 raise ViewError, "Parent and record IDs shouldn't be given when doing a lookup"
         if operation == self.update_view or operation == self.delete_view:
-            if not ((table == models.Parent and self.args.pid) or self.args.rid):
+            if not (((table == models.Parent or table == models.Address) and self.args.pid) or self.args.rid):
                 raise ViewError, "Record ID (or parent ID for parents) required to update or delete records"
         if operation == self.delete_view:
             if table == models.Parent and not self.args.pid:
@@ -163,7 +162,7 @@ class View(object):
         # others: key dict --> key=value
         if operation in [self.create_view, self.update_view]:
             return self.get_input_general(self.args.input, valid_keys, table)
-        elif operation.viewref == 'retrieve':
+        elif operation == self.retrieve_view:
             return self.get_input_retrieve(self.args.input, valid_keys, table)
         else:
             raise ViewError, 'Something gone wrong table:%s, operation:%, input:%s' % (
@@ -219,7 +218,7 @@ class View(object):
             if not (term_count == 1 and cond_count == 1):
                 raise ViewError, "%s is not a valid query expression. Specify key=term,operation." % expr
 
-            cond,term_part = expr.split(',')
+            term_part,cond = expr.split(',')
             key,value = term_part.split('=')
 
             if cond not in CONDITIONS:
@@ -241,35 +240,7 @@ class View(object):
         """ Create a new record
         """        
         session, table_object, params = self.parse_objects(**kwargs)
-        print '**PARAMS'
-        print params
-
-        partner = None
-        parent = None
-        if 'parent_id' in params:
-            parent_id = params['parent_id']
-            parent = session.query(models.Parent).filter(models.Parent.id == parent_id).one()
-
-        if parent:
-            if parent.partner:
-                partner = parent.partner
-            elif parent.other:
-                partner = parent.other
-
-        record = table_object(**params)
-
-        if table_object == models.Parent:
-            if parent:
-                record.partner = parent
-
-        elif table_object == models.Child:
-            if partner:
-                record.parents = [parent, partner]
-            else:
-                record.parents = [parent]
-                
-        elif table_object in [models.Skill, models.Freetime]:
-            record.parents = [parent]
+        record = self.decorate_create_update('create', session, table_object, params)
 
         session.add(record)
         session.commit()
@@ -294,29 +265,126 @@ class View(object):
     def retrieve_view(self, **kwargs):
         """ Perform a lookup
         """
-        print kwargs
+        results = None
+        kwargs['_search_'] = True
+        session, table_object, terms = self.parse_objects(**kwargs)
+        print terms
+        
+        table_object = "models." + table_object.classname.capitalize()
+        filter_units = []
+        qtxt = 'session.query(' + table_object + ').filter('
+        cond_units = [qtxt]
+        i = 0
+        while terms:
+            term = terms.pop()
+            if type(term) == type(sql.and_):
+                cond_units.append('sql.' + term.__name__ + '(' + filter_units[i -1])
+                i +=1
+                continue
+                
+            key, value_op = term.items()[0]
+            value,op = value_op
+            filter_units.append(fmt_term(table_object, key, value, op))
+
+        cond_units.append(filter_units[i])
+
+        xb = ''
+        if i:
+            xb = ')' * i
+        qtxt = cond_units[0]
+        if i > 0:
+            qtxt += ','.join(cond_units[1:])
+        else:
+            qtxt += ''.join(cond_units[1])
+        qtxt += xb + ').all()'
+
+        print qtxt
+        results = eval(qtxt)
+        if results:
+            for i, result in enumerate(results):
+                print "Result:%s\n\tRID:%s\n\t%s\n" % (1+i, result.id, result)
         
     def update_view(self, **kwargs):
         """ Modify a record
         """
         session, table_object, params = self.parse_objects(**kwargs)
-        print '*PARAMS:'
-        print params
-        
-        if not table_object == models.Parent:
-            q = session.query(table_object).filter(
-                table_object.id == params['record_id']).one()
-        else:
-            q = session.query(models.Parent).filter(
-                models.Parent.id == params['pid']).one()
+        record = self.decorate_create_update('update', session, table_object, params)
 
-        for k,v in params.iteritems():
-            if k == 'pid':
-                continue
-            setattr(q, k, v)
-
+        session.merge(record)
         session.commit()
         session.close()
+
+    def decorate_create_update(self, operation, session, table_object, params):
+        """ Attach parent and parent.partner to new
+            and updated records
+
+            Bit hacky around Address table, and the way
+            parent_id --pid and --rid are used for Parent tables
+        """
+        #print '*Params'
+        #print params
+        partner = None
+        parent = None
+        if 'parent_id' in params:
+            parent_id = params['parent_id']
+            parent = session.query(models.Parent).filter(models.Parent.id == parent_id).one()
+
+        if parent:
+            if parent.partner:
+                partner = parent.partner
+            elif parent.other:
+                partner = parent.other
+
+        # Create new record
+        if operation == 'create':
+            record = table_object(**params)
+        else:
+            # Process Update requests
+            # All updates apart from Address use record_id for lookups
+            # Note pid -> record_id 
+            if table_object != models.Address:
+                record = session.query(table_object).filter(
+                    table_object.id==params['record_id']).one()
+            else:
+                if parent:
+                    record = session.query(table_object).filter(
+                        table_object.parent_id==params['parent_id']).one()
+                else:
+                    record = session.query(table_object).filter(
+                        table_object.id==params['record_id']).one()
+                    
+        # Parent table => add partner if present            
+        if table_object == models.Parent:
+            if parent:
+                record.partner = parent
+                
+        # Child table => add parents
+        elif table_object == models.Child:
+            if parent and partner:
+                record.parents = [parent, partner]
+            elif parent:
+                record.parents = [parent]
+            # debug
+            print record.parents
+
+        # Skills and freetime, add owner
+        elif table_object in [models.Skill, models.Freetime]:
+            if parent:
+                record.parents = [parent]
+        elif table_object == models.Address:
+            pass
+        else:
+            raise ViewError, "Something gone wrong"
+
+        # Update any other parameters
+        for key, value in params.iteritems():
+            if key in ['pid', 'record_id', 'parent_id']:
+                continue
+            setattr(record, key, value)
+
+        print record
+        return record
+
         
     def parse_objects(self, **kwargs):
         """ Post parse key value pair arguments
@@ -324,10 +392,16 @@ class View(object):
 
             Note parent tables have a primary id and a parent_id key.
             if table is *NOT* parent, then parent_id == pid
+
+            if updating a parent, user may specif --rid or --pid for parent
         """
         session =  self.session_config.get_session()
         table_object = kwargs['table']
         params = kwargs['input_dict']
+
+        if '_search_' in kwargs:
+            del kwargs['_search_']
+            return (session, table_object, params)
 
         if self.args.pid:
             try:
@@ -341,19 +415,36 @@ class View(object):
             else:
                 params['parent_id'] = pid
 
+            # Hack for update parent where, where user used --pid
+            # rather than --rid
+            if (table_object == models.Parent or table_object == models.Address
+            ) and 'record_id' not in params:
+                params['record_id'] = pid
+
         if self.args.rid:
             try:
                 rid = int(self.args.rid)
             except ValueError, e:
                 raise ViewError, "%s is an invalid Record ID" % self.args.rid
 
+            # Hack for update parent view, where user has used --rid
+            # rather than --pid (note --pid + --rid is invalid)
+            params['record_id'] = rid
             if table_object != models.Parent:
-                params['record_id'] = rid
-            else:
                 params['pid'] = rid
                 
         return (session, table_object, params)
-
+        
+def fmt_term(table_object, key, value, op):
+    # equals / not equals
+    if op == '==' or op == '!=':
+        return table_object + '.' + key + op + '\'' + value + '\''
+    # like
+    elif op == '.like(':
+        return table_object + '.' + key + op + '\'%' + value + '%\')'
+    else:
+        raise ViewError, "Unsupported query operator"
+                
 def format_time(timestr):
     if ':' not in timestr or 4 < len(timestr) > 5:
         raise ValueError, 'Input times must be hh:mm format'
@@ -380,6 +471,7 @@ Add, delete, modify or search skills database.
   be assumed in the current working directory.
 
   For addition and update operations, Input should be specified in the form of key=value.
+  To define a relationship between two parents, use key=value of parent_id=`pid of partner`
   Multiple inputs are parsed on whitespace.
 
   Search operations should be specified in key=value,operator=term, where terms may be one
