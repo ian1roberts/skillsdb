@@ -40,9 +40,10 @@ parser_group.add_argument('filename', nargs="?", type=str, help="Configuration f
 config.ConfigOptions.customize_parser(parser_group)
 
 # views
-parser_group = subparsers.add_parser('manage', description=views.main.__doc__, help="Manage database")
+parser_group = subparsers.add_parser('manage', description=views.main.__doc__, help="Manage database", formatter_class=RawDescriptionHelpFormatter)
 parser_group.set_defaults(func=views.main)
 parser_group.add_argument('--pid', type=int, help="Parent record ID", default=None)
+parser_group.add_argument('--rid', type=int, help="Record ID", default=None)
 parser_group.add_argument('--config', '-C', type=str, help="config filename (config.cfg)", default=config.FNAME)
 
 parser_group.add_argument('input', nargs=argparse.REMAINDER, help="Field data string")

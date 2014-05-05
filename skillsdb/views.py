@@ -10,6 +10,10 @@ import utils
 import config
 import models
 
+CONDITIONS = {'OR':sql.or_, 'AND':sql.and_, 'NOT':sql.not_,
+              'startswith':'startswith', 'equals':'equals', 'contains':'contains',
+              'like':'like'}
+
 class ViewOptions(object):
     """ Options to extend view methods
     """
@@ -30,31 +34,25 @@ class View(object):
     def __init__(self, args):
         """ Instantiate view and dispatch database command
 
-        Support CRUD views, operating on given table (XOR)
+        Support CRUD views, operating on given table
         --child
         --freetime
         --parent
         --skill
+        --address
 
-        Operations are XOR
-        --delete, --modify require a parent ID
-        --add, --search do not require a parent ID
+        --add, require PID except parent
+        --delete, modify, require RID
+        --search, special syntax
 
-        Freetext input parsing is context specific
-        --add -> split remainder on space and `=`, no parent ID on parent table
-        --delete -> Delete table on parent ID
-        --search -> search `table` on input, no parent ID
-        --modify -> Modify `table` on parent ID, free text
+        operations: get table, get operation, parse input, execute
 
-        Addition of a parent is the only create not requiring a parent ID
         """
         self.args = args
 
         table = self.get_table_object()
         operation = self.get_operation()
-        input_dict = {}
-        if not (operation == self.delete_view and table == models.Parent):
-            input_dict = self.get_input(table)
+        input_dict = self.get_input(table, operation)
 
         self.validate_cla(table, operation, input_dict)
         self.session_config = self.load_session(self.args.config)
@@ -114,18 +112,23 @@ class View(object):
         if operation == self.create_view:
             if table == models.Parent and self.args.pid:
                 raise ViewError, "Parent ID shouldn't be given when creating Parent"
-            elif not self.args.pid and (table == models.Skill or table == models.Freetime or table == models.Child or table == models.Address):
-                raise ViewError, "Parent ID is required when creating %s %s record" % (do_proc_name(table.classname))
-
+            if not self.args.pid and not table == models.Parent:
+                raise ViewError, "Parent ID is required when creating %s %s record" % (
+                    do_proc_name(table.classname))
         if operation == self.retrieve_view:
-            if self.args.pid:
-                raise ViewError, "Parent ID shouldn't be given when doing a lookup"
+            if self.args.pid or self.args.rid:
+                raise ViewError, "Parent and record IDs shouldn't be given when doing a lookup"
         if operation == self.update_view or operation == self.delete_view:
-            if not self.args.pid:
-                raise ViewError, "parent ID required to update or delete records"
+            if not ((table == models.Parent and self.args.pid) or self.args.rid):
+                raise ViewError, "Record ID (or parent ID for parents) required to update or delete records"
         if operation == self.delete_view:
-            if table != models.Parent and "record" not in input_dict:
-                raise ViewError, "'id'required to delete non parent record"
+            if table == models.Parent and not self.args.pid:
+                raise ViewError, "Parent ID required to delete parent record"
+            if table != models.Parent and self.args.pid:
+                raise ViewError, "Parent ID irrelevent for deletion of %s records" % table.classname
+
+        if self.args.pid and self.args.rid:
+            raise ValueError, "Inconsistent command line arguments. --pid and --rid jointly specified."
 
         if not os.path.exists(self.args.config):
             raise ViewError, "%s configuration file not found" % os.path.basename(self.args.config)
@@ -135,22 +138,43 @@ class View(object):
         params = utils.Params(config_fname, load=True)
         return config.Config(params)
         
-    def get_input(self, table):
+    def get_input(self, table, operation):
         """ Parse free text input.
             Context specific
-
         """
-        valid_keys = table().get_attrs()
-        valid_keys += ['record']
+        # Delete mode shouldn't have input string
+        if operation == self.delete_view:
+            if self.args.input:
+                raise ViewError, "Input is invalid for delete mode. use --rid to specify a record"
+            return {}
 
+        # Build list of valid key names
+        valid_keys = table().get_attrs()
+
+        print 'valid_keys'
         print valid_keys
+        print 'input'
         print self.args.input
         
         if not self.args.input:
             raise ViewError, "No input data to parse"
 
+        # retrieve: key dict --> key=value,op COND
+        # others: key dict --> key=value
+        if operation in [self.create_view, self.update_view]:
+            return self.get_input_general(self.args.input, valid_keys, table)
+        elif operation.viewref == 'retrieve':
+            return self.get_input_retrieve(self.args.input, valid_keys, table)
+        else:
+            raise ViewError, 'Something gone wrong table:%s, operation:%, input:%s' % (
+                table, operation, self.args.input)
+
+    def get_input_general(self, txt, valid_keys, table):
+        """ Parse input for add,update
+        """
         key_dict = {}
-        for kvpair in self.args.input:
+
+        for kvpair in txt:
             if "=" not in kvpair:
                 raise ViewError, "Incorrect format:%s. Use key=value for data entry." % kvpair
             sepcount = sum([1 for i in kvpair if i =='='])
@@ -176,19 +200,49 @@ class View(object):
 
         return key_dict
         
+    def get_input_retrieve(self, txt, valid_keys, table):
+        """ Parse input for query mode
+        """
+        query_builder = []
+        while txt:
+            expr = txt.pop()
+
+            if expr in CONDITIONS:
+                query_builder.append(CONDITIONS[expr])
+                continue
+
+            if not ('=' in expr and ',' in expr):
+                raise ViewError, "%s is not a valid query expression" % expr
+            term_count = sum(1 for i in expr if i=="=")
+            cond_count = sum(1 for i in expr if i==',')
+
+            if not (term_count == 1 and cond_count == 1):
+                raise ViewError, "%s is not a valid query expression. Specify key=term,operation." % expr
+
+            cond,term_part = expr.split(',')
+            key,value = term_part.split('=')
+
+            if cond not in CONDITIONS:
+                raise ViewError, "%s is not a valid query expression. %s is not a recognized operator.  Choose from %" % (expr, cond, CONDITIONS)
+
+            if key not in valid_keys:
+                raise ViewError, "'%s' is not a valid key for table '%s'" % (
+                    key, table.classname
+                )     
+                
+            if key in ['am_start', 'am_end', 'pm_start', 'pm_end']:
+                value = format_time(value)
+                    
+            query_builder.append({key:(value, CONDITIONS[cond])})
+
+        return query_builder
+
     def create_view(self, **kwargs):
         """ Create a new record
-        """
+        """        
         session, table_object, params = self.parse_objects(**kwargs)
         print '**PARAMS'
         print params
-        try:
-            pid = params['pid']
-            params['parent_id'] = pid
-            del params['pid']
-        except KeyError:
-            pass
-            
         
         record = table_object(**params)
         session.add(record)
@@ -197,17 +251,14 @@ class View(object):
         
     def delete_view(self, **kwargs):
         """ Delete a record by parent_id and record id
-        """
+        """        
         session, table_object, params = self.parse_objects(**kwargs)
-
         if not table_object == models.Parent:
-            q = session.query(table_object).filter(sql.and_(
-                table_object.parent_id == params['pid'],
-                table_object.id == params['record'])).one()
-
+            q = session.query(table_object).filter(
+                table_object.id == params['record_id']).one()
         else:
             q = session.query(models.Parent).filter(
-                models.Parent.id == params['pid']).one()
+                models.Parent.id == params['parent_id']).one()
 
         session.delete(q)
         session.commit()
@@ -223,12 +274,12 @@ class View(object):
         """ Modify a record
         """
         session, table_object, params = self.parse_objects(**kwargs)
-
+        print '*PARAMS:'
+        print params
+        
         if not table_object == models.Parent:
-            q = session.query(table_object).filter(sql.and_(
-                table_object.parent_id == params['pid'],
-                table_object.id == params['record'])).one()
-
+            q = session.query(table_object).filter(
+                table_object.id == params['record_id']).one()
         else:
             q = session.query(models.Parent).filter(
                 models.Parent.id == params['pid']).one()
@@ -242,6 +293,12 @@ class View(object):
         session.close()
         
     def parse_objects(self, **kwargs):
+        """ Post parse key value pair arguments
+            Fix up parent ID and record ID if specified
+
+            Note parent tables have a primary id and a parent_id key.
+            if table is *NOT* parent, then parent_id == pid
+        """
         session =  self.session_config.get_session()
         table_object = kwargs['table']
         params = kwargs['input_dict']
@@ -253,8 +310,22 @@ class View(object):
                 print e
                 print 'Incorrectly formatted parent id:%s' % self.args.pid
 
-            params['pid'] = pid
-            
+            if ('parent_id' in params) or table_object == models.Parent:
+                params['pid'] = pid
+            else:
+                params['parent_id'] = pid
+
+        if self.args.rid:
+            try:
+                rid = int(self.args.rid)
+            except ValueError, e:
+                raise ViewError, "%s is an invalid Record ID" % self.args.rid
+
+            if table_object != models.Parent:
+                params['record_id'] = rid
+            else:
+                params['pid'] = rid
+                
         return (session, table_object, params)
 
 def format_time(timestr):
@@ -271,6 +342,27 @@ def format_time(timestr):
         print "%s\n%s hours, %s mins incorrectly formatted" % (e, h, m)
     
 def main(args):
-    """ Parse input command and dispatch
+    """
+Add, delete, modify or search skills database.
+    
+  Select one of parent, child, skill, freetime or address tables.
+  Record creation requires a parent identifier (--pid) with the exception of "add parent".
+  Record deletion and modification requires a record identifier (--rid), which may be
+  discovered via searching, if not already known.
+    
+  A configuration file is required.  If not explicitly given (--config), a default config.cfg will
+  be assumed in the current working directory.
+
+  For addition and update operations, Input should be specified in the form of key=value.
+  Multiple inputs are parsed on whitespace.
+
+  Search operations should be specified in key=value,operator=term, where terms may be one
+  of equals, startswith, contains or like. Queries may be built using conditional operators:
+  AND, OR and NOT 
+
+  skillsdb manage --add --parent first_name=Ian second_name=Roberts
+  skillsdb manage --modify --parent --pid 1 first_name=Bob
+  skillsdb manage --search --parent first_name=Ian,op=startswith AND second_name=Roberts,op=equals
+  skillsdb manage --delete --parent --pid 1
     """
     sys.exit(View(args))

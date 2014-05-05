@@ -13,8 +13,6 @@ from sqlalchemy import (Table, Column, Integer, String, ForeignKey,
 from sqlalchemy.pool import NullPool
 import sqlalchemy as sa
 
-print sa.__version__
-
 metadata = sa.MetaData()
 Base = declarative_base(metadata=metadata)
 TODAY = datetime.datetime.today().date()
@@ -67,7 +65,7 @@ class DbMixin(object):
         return "%r, (%s)" % (self, self.id)
         
     def get_attrs(self):
-        item = inspect(self)
+        item = sa.inspect(self)
         return item.attrs.keys()
         
     @declared_attr
