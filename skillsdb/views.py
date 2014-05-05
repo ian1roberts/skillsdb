@@ -243,8 +243,34 @@ class View(object):
         session, table_object, params = self.parse_objects(**kwargs)
         print '**PARAMS'
         print params
-        
+
+        partner = None
+        parent = None
+        if 'parent_id' in params:
+            parent_id = params['parent_id']
+            parent = session.query(models.Parent).filter(models.Parent.id == parent_id).one()
+
+        if parent:
+            if parent.partner:
+                partner = parent.partner
+            elif parent.other:
+                partner = parent.other
+
         record = table_object(**params)
+
+        if table_object == models.Parent:
+            if parent:
+                record.partner = parent
+
+        elif table_object == models.Child:
+            if partner:
+                record.parents = [parent, partner]
+            else:
+                record.parents = [parent]
+                
+        elif table_object in [models.Skill, models.Freetime]:
+            record.parents = [parent]
+
         session.add(record)
         session.commit()
         session.close()
@@ -366,3 +392,50 @@ Add, delete, modify or search skills database.
   skillsdb manage --delete --parent --pid 1
     """
     sys.exit(View(args))
+
+
+if __name__ == '__main__':
+    from utils import Params
+    
+    fn = '/home/ian/dev/python/skillsdb/skillsdb/config.cfg'
+    p = Params(fn, load=True)
+    x = config.Config(p)
+    s = x.get_session()
+
+    # Parent child : method 1
+    p1 = models.Parent(first_name="Joe", second_name="Blogs")
+    p2 = models.Parent(first_name="Jane", second_name="Blogs")
+    p1.partner = p2 # use `other` to get related parent
+    c1 = models.Child(first_name="Jack", second_name="Blogs")
+    c1.parents = [p1, p2]
+    s.add(c1)
+    s.commit()
+    s.close()
+    
+    # Parent child : method 2
+    p3 = models.Parent(first_name="Ian", second_name="Roberts")
+    p4 = models.Parent(first_name="Suet-Feung", second_name="Chin")
+    p3.partner = p4 # use `other` to get related parent
+    c = models.Child(first_name="Matthew", second_name="Roberts")
+    p3.children = [c]
+    p4.children = [c]
+    s.add(p3)
+    s.commit()
+    s.close()
+
+    # DB introspect
+    # method 1
+    q = s.query(models.Parent).filter(models.Parent.id==1).one()
+    print q
+    print q.other
+
+    print q.children[0]
+    print q.other.children[0]
+
+    # method 2
+    q = s.query(models.Parent).filter(models.Parent.id==3).one()
+    print q
+    print q.other
+
+    print q.children[0]
+    print q.other.children[0]
